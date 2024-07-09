@@ -49,6 +49,8 @@ def parse_args():
                         help='The maximum number of estimated poses')
     parser.add_argument("-v", "--video", type=str, default='camera',
                         help="input video file name")
+    parser.add_argument('--video_dir', type=str, default='', help='input videos')
+    parser.add_argument('--target_dir', type=str, default='', help='output videos')
     parser.add_argument('--gpu', type=str, default='0', help='input video')
     parser.add_argument('--fix_z', action='store_true', help='fix z axis')
     args = parser.parse_args()
@@ -102,6 +104,7 @@ def gen_video_kpts(video, det_dim=416, num_peroson=1, gen_output=False):
     kpts_result = []
     scores_result = []
     for ii in tqdm(range(video_length)):
+        start_time = time.time()
         ret, frame = cap.read()
 
         if not ret:
@@ -157,6 +160,9 @@ def gen_video_kpts(video, det_dim=416, num_peroson=1, gen_output=False):
 
         kpts_result.append(kpts)
         scores_result.append(scores)
+
+        end_time = time.time()
+        # print(f'pose 2D pred elapsed time: {end_time - start_time}')
 
     keypoints = np.array(kpts_result)
     scores = np.array(scores_result)

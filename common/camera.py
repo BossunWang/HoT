@@ -5,6 +5,8 @@ import torch
 
 def normalize_screen_coordinates(X, w, h):
     assert X.shape[-1] == 2
+    # Normalize so that [0, w] is mapped to [-1, 1], while preserving the aspect ratio
+    # if w > h, else exchange w and h
     return X / w * 2 - [1, h / w]
 
 
@@ -25,6 +27,7 @@ def qrot(q, v):
     qvec = q[..., 1:]
     uv = torch.cross(qvec, v, dim=len(q.shape) - 1)
     uuv = torch.cross(qvec, uv, dim=len(q.shape) - 1)
+    # change the orientation from camera view to world view
     return (v + 2 * (q[..., :1] * uv + uuv))
 
 

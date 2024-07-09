@@ -25,6 +25,7 @@ sys.path.append(os.getcwd())
 from common.utils import *
 from common.camera import *
 from model.mixste.hot_mixste import Model
+import time
 
 
 def show2Dpose(kps, img):
@@ -100,17 +101,21 @@ def get_pose2D(video_path, output_dir):
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
     print('\nGenerating 2D pose...')
+
     with torch.no_grad():
         # the first frame of the video should be detected a person
         keypoints, scores = hrnet_pose(video_path, det_dim=416, num_peroson=1, gen_output=True)
     keypoints, scores, valid_frames = h36m_coco_format(keypoints, scores)
+
     re_kpts = revise_kpts(keypoints, scores, valid_frames)
     print('Generating 2D pose successfully!')
 
-    output_dir += 'input_2D/'
+    output_dir = os.path.join(output_dir, 'input_2D')
     os.makedirs(output_dir, exist_ok=True)
 
-    output_npz = output_dir + 'input_keypoints_2d.npz'
+    video_name = os.path.basename(video_path)
+    npz_name = os.path.splitext(video_name)[0] + '.npz'
+    output_npz = os.path.join(output_dir, npz_name)
     np.savez_compressed(output_npz, reconstruction=keypoints)
 
 
@@ -148,15 +153,13 @@ def get_pose3D(video_path, output_dir, fix_z):
     args.previous_dir = 'checkpoint/pretrained/hot_mixste'
     args.n_joints, args.out_joints = 17, 17
 
-    output_dir_2D = output_dir +'pose2D/'
+    output_dir_2D = os.path.join(output_dir, 'pose2D')
     os.makedirs(output_dir_2D, exist_ok=True)
-    output_dir_3D = output_dir +'pose3D/'
+    output_dir_3D = os.path.join(output_dir, 'pose3D')
     os.makedirs(output_dir_3D, exist_ok=True)
 
     ## Reload 
     model = Model(args).cuda()
-
-    model_dict = model.state_dict()
     # Put the pretrained model in 'checkpoint/pretrained/hot_mixste'
     model_path = sorted(glob.glob(os.path.join(args.previous_dir, '*.pth')))[0]
 
@@ -169,7 +172,10 @@ def get_pose3D(video_path, output_dir, fix_z):
     model.eval()
 
     ## input
-    keypoints = np.load(output_dir + 'input_2D/input_keypoints_2d.npz', allow_pickle=True)['reconstruction']
+    video_name = os.path.basename(video_path)
+    npz_name = os.path.splitext(video_name)[0] + '.npz'
+    pose2d_data_path = os.path.join(output_dir, 'input_2D', npz_name)
+    keypoints = np.load(pose2d_data_path, allow_pickle=True)['reconstruction']
 
     cap = cv2.VideoCapture(video_path)
     video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -185,7 +191,7 @@ def get_pose3D(video_path, output_dir, fix_z):
     print('\nGenerating 3D pose...')
     frame_sum = 0
     for i in tqdm(range(n_chunks)):
-
+        start_time = time.time()
         # input frames
         start_index = i * args.frames - offset
         end_index = (i+1) * args.frames - offset
@@ -239,17 +245,14 @@ def get_pose3D(video_path, output_dir, fix_z):
         output_3D[:, :, 0, :] = 0
         post_out = output_3D[0].cpu().detach().numpy()
 
-        if i == 0:
-            output_3d_all = post_out
-        else:
-            output_3d_all = np.concatenate([output_3d_all, post_out], axis = 0)
-
         # h36m_cameras_extrinsic_params in common/camera.py
         # https://github.com/facebookresearch/VideoPose3D/blob/main/common/custom_dataset.py#L23
         rot =  [0.1407056450843811, -0.1500701755285263, -0.755240797996521, 0.6223280429840088]
         rot = np.array(rot, dtype='float32')
         post_out = camera_to_world(post_out, R=rot, t=0)
 
+        end_time = time.time()
+        # print(f'pose 3D pred elapsed time: {end_time - start_time}')
         ## 2D
         for j in range(low_index, high_index):
             jj = j - frame_sum
@@ -261,7 +264,8 @@ def get_pose3D(video_path, output_dir, fix_z):
 
             image = show2Dpose(input_2D_no[jj], copy.deepcopy(img))
 
-            cv2.imwrite(output_dir_2D + str(('%04d'% j)) + '_2D.png', image)
+            save_2d_path = os.path.join(output_dir_2D, str(('%04d' % j)) + '_2D.png')
+            cv2.imwrite(save_2d_path, image)
 
             ## 3D
             fig = plt.figure(figsize=(9.6, 5.4))
@@ -272,14 +276,21 @@ def get_pose3D(video_path, output_dir, fix_z):
             post_out[jj, :, 2] -= np.min(post_out[jj, :, 2])
             show3Dpose(post_out[jj], ax, fix_z)
 
-            plt.savefig(output_dir_3D + str(('%04d'% j)) + '_3D.png', dpi=200, format='png', bbox_inches = 'tight')
+            save_3d_path = os.path.join(output_dir_3D, str(('%04d' % j)) + '_3D.png')
+            plt.savefig(save_3d_path, dpi=200, format='png', bbox_inches='tight')
 
         frame_sum = high_index
-    
+
+        if i == 0:
+            output_3d_all = post_out
+        else:
+            output_3d_all = np.concatenate([output_3d_all, post_out], axis = 0)
+
     ## save 3D keypoints
-    os.makedirs(output_dir + 'output_3D/', exist_ok=True)
-    output_npz = output_dir + 'output_3D/' + 'output_keypoints_3d.npz'
-    np.savez_compressed(output_npz, reconstruction=output_3d_all)
+    npy_name = os.path.splitext(video_name)[0] + '.npy'
+    os.makedirs(os.path.join(output_dir, 'output_3D'), exist_ok=True)
+    output_npy = os.path.join(output_dir, 'output_3D', npy_name)
+    np.save(output_npy, output_3d_all)
 
     print('Generating 3D pose successfully!')
 
@@ -322,7 +333,9 @@ def get_pose3D(video_path, output_dir, fix_z):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--video', type=str, default='sample_video.mp4', help='input video')
+    parser.add_argument('--video', type=str, default='', help='input videos')
+    parser.add_argument('--video_dir', type=str, default='', help='input videos')
+    parser.add_argument('--target_dir', type=str, default='', help='output videos')
     parser.add_argument('--gpu', type=str, default='0', help='input video')
     parser.add_argument('--fix_z', action='store_true', help='fix z axis')
 
@@ -330,13 +343,18 @@ if __name__ == "__main__":
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
-    video_path = './demo/video/' + args.video
-    video_name = video_path.split('/')[-1].split('.')[0]
-    output_dir = './demo/output/' + video_name + '/'
+    video_dir_path = args.video_dir
 
-    # get_pose2D(video_path, output_dir)
-    get_pose3D(video_path, output_dir, args.fix_z)
-    img2video(video_path, output_dir)
-    print('Generating demo successfully!')
+    for root, dirs, files in os.walk(video_dir_path, topdown=False):
+        for file in files:
+            video_path = os.path.join(root, file)
+            video_name = video_path.split('/')[-1].split('.')[0]
+            print(video_path)
+
+            output_dir = os.path.join(args.target_dir, video_name)
+
+            get_pose2D(video_path, output_dir)
+            get_pose3D(video_path, output_dir, args.fix_z)
+            img2video(video_path, output_dir)
 
 

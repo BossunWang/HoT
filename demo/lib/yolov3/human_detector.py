@@ -70,6 +70,8 @@ def arg_parse():
     parser.add_argument('-v', '--video', type=str, default='camera', help='The input video path')
     parser.add_argument('-i', '--image', type=str, default=cur_dir + '/data/dog-cycle-car.png',
                         help='The input video path')
+    parser.add_argument('--video_dir', type=str, default='', help='input videos')
+    parser.add_argument('--target_dir', type=str, default='', help='output videos')
     parser.add_argument('-np', '--num-person', type=int, default=1, help='number of estimated human poses. [1, 2]')
     parser.add_argument('--gpu', type=str, default='0', help='input video')
     parser.add_argument('--fix_z', action='store_true', help='fix z axis')
